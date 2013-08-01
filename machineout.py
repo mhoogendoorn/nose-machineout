@@ -4,6 +4,7 @@ It is intended to be use to integrate nose with your IDE such as Vim.
 """
 import os
 import re
+import textwrap
 import traceback
 from nose.plugins import Plugin
 
@@ -88,33 +89,81 @@ class NoseMachineReadableOutput(Plugin):
         value_str = str(value)
 
         if value_str.startswith(u'Failed doctest test'):
-            m = doctest_value_pattern.search(value_str)
-            fname, lineno, funname, example, expected, got, exc = m.groups()
-            lineno = int(lineno)
-            if exc:
-                lines = exc.strip().split('\n')
-                msg = "[Doctest] %s" % (lines[-1].strip())
-            else:
-                lines = []
-                msg = "[Doctest] %s should be %s but got %s" % (example,
-                                                                repr(expected),
-                                                                repr(got))
+            linesets = self._format_doctests(value_str)
+            for etype, fname, lineno, lines in linesets:
+                self._write_lines(etype, fname, lineno, lines)
         else:
             fulltb = traceback.extract_tb(tb)
             fname, lineno, funname, msg = self._selectBestStackFrame(fulltb)
 
             lines = traceback.format_exception_only(exctype, value)
             lines = [line.strip('\n') for line in lines]
-            msg = lines[0]
 
+            self._write_lines(etype, fname, lineno, lines)
+
+
+    def _write_lines(self, etype, fname, lineno, lines):
         fname = self._format_testfname(fname)
         prefix = "%s:%d" % (fname, lineno)
-        self.stream.writeln("%s: %s: %s" % (prefix, etype, msg))
+        
+        if lines:
+            self.stream.writeln("%s: %s: %s" % (prefix, etype, lines[0]))
 
         if len(lines) > 1:
             pad = ' ' * (len(etype) + 1)
             for line in lines[1:]:
                 self.stream.writeln("%s: %s %s" % (prefix, pad, line))
+
+    def _format_doctests(self, err_str):
+        """
+        >>> o = NoseMachineReadableOutput()
+        >>> err = '''
+        ...          Failed doctest test for foo
+        ...            File "/foo.py", line 1, in foo_fn
+        ...          
+        ...          -------------------------------------------------
+        ...          File "/foo.py", line 9, in foo_fn
+        ...          Failed example:
+        ...              foo_fn()
+        ...          Expected:
+        ...              foo
+        ...          Got:
+        ...              bar
+        ...          -------------------------------------------------
+        ...          File "/foo.py", line 10, in foo_fn
+        ...          Failed example:
+        ...              print(bar)
+        ...          Exception raised:
+        ...              Traceback (most recent call last):
+        ...                ...
+        ...              NameError: name 'bar' is not defined
+        ...       '''
+        >>> err = textwrap.dedent(err)
+        >>> list(o._format_doctests(err)) # doctest: +NORMALIZE_WHITESPACE
+        [('fail', '/foo.py', 9, ["expected '    foo' but got '    bar'"]),
+         ('error', '/foo.py', 10,
+          ["NameError: name 'bar' is not defined",
+           'Traceback (most recent call last):',
+           '  ...',
+           "NameError: name 'bar' is not defined"])]
+        """
+        err_parts = re.split('-+', err_str)
+
+        for part in err_parts[1:]:
+            m = doctest_value_pattern.search(part)
+            fname, lineno, funname, example, expected, got, exc = m.groups()
+            lineno = int(lineno)
+            if exc:
+                etype = 'error'
+                lines = textwrap.dedent(exc.strip('\n')).split('\n')
+                lines.insert(0, lines.pop())
+            else:
+                etype = 'fail'
+                lines = ["expected %s but got %s" % (repr(expected),
+                                                     repr(got))]
+            yield etype, fname, lineno, lines
+
+        
 
     def _format_testfname(self, fname):
         if fname.startswith(self.basepath):
