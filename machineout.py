@@ -19,8 +19,8 @@ class DummyStream:
         pass
 
 doctest_value_pattern = re.compile(
-    r"""File "([^"]*)", line (\d*), in (.*)\nFailed example:\n"""
-    """\s*(.*)\nExpected:\n\s*(.*)\nGot:\n\s*(.*)""")
+    r'File "([^"]*)", line (\d*), in ([^\n]*)\nFailed example:\n'
+    r'\s*(.*)\nExpected:\n(.*)Got:\n(.*)', re.DOTALL)
 
 class NoseMachineReadableOutput(Plugin):
     """
@@ -84,13 +84,16 @@ class NoseMachineReadableOutput(Plugin):
 
     def add_formatted(self, etype, err):
         exctype, value, tb = err
-        if (isinstance(value, basestring) and 
-                value.startswith(u'Failed doctest test')):
-            m = doctest_value_pattern.search(value)
+        value_str = str(value)
+
+        if value_str.startswith(u'Failed doctest test'):
+            m = doctest_value_pattern.search(value_str)
             fname, lineno, funname, example, expected, got = m.groups()
             lineno = int(lineno)
             lines = []
-            msg = "[Doctest] %s should be %s but got %s" % (example, expected, got)
+            msg = "[Doctest] %s should be %s but got %s" % (example, 
+                                                            repr(expected),
+                                                            repr(got))
         else:
             fulltb = traceback.extract_tb(tb)
             fname, lineno, funname, msg = self._selectBestStackFrame(fulltb)
