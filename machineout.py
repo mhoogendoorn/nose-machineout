@@ -21,7 +21,7 @@ class DummyStream:
 
 doctest_value_pattern = re.compile(
     r'File "([^"]*)", line (\d*), in ([^\n]*)\nFailed example:\n'
-    r'\s*(.*)\n(?:(?:Expected:\n(.*)\nGot:\n(.*)\n)'
+    r'\s*([^\n]*)\n(?:(?:Expected:\n(.*)\nGot(?:(?::?\n(.*)\n)|(?: (nothing))))'
     r'|(?:Exception raised:\n(.*)))', re.DOTALL)
 
 class NoseMachineReadableOutput(Plugin):
@@ -122,6 +122,13 @@ class NoseMachineReadableOutput(Plugin):
         ...            File "/foo.py", line 1, in foo_fn
         ...          
         ...          -------------------------------------------------
+        ...          File "/foo.py", line 5, in foo_fn
+        ...          Failed example:
+        ...              foo_bar()
+        ...          Expected:
+        ...              foo
+        ...          Got nothing
+        ...          -------------------------------------------------
         ...          File "/foo.py", line 9, in foo_fn
         ...          Failed example:
         ...              foo_fn()
@@ -140,23 +147,26 @@ class NoseMachineReadableOutput(Plugin):
         ...       '''
         >>> err = textwrap.dedent(err)
         >>> list(o._format_doctests(err)) # doctest: +NORMALIZE_WHITESPACE
-        [('fail', '/foo.py', 9, ["expected '    foo' but got '    bar'"]),
+        [('fail', '/foo.py', 5, ["expected '    foo' but got nothing"]),
+         ('fail', '/foo.py', 9, ["expected '    foo' but got '    bar'"]),
          ('error', '/foo.py', 10,
           ["NameError: name 'bar' is not defined",
            'Traceback (most recent call last):',
-           '  ...',
-           "NameError: name 'bar' is not defined"])]
+           '  ...'])]
         """
         err_parts = re.split('-+', err_str)
 
         for part in err_parts[1:]:
             m = doctest_value_pattern.search(part)
-            fname, lineno, funname, example, expected, got, exc = m.groups()
+            fname, lineno, funname, example, expected, got, got_nothing, exc = m.groups()
             lineno = int(lineno)
             if exc:
                 etype = 'error'
                 lines = textwrap.dedent(exc.strip('\n')).split('\n')
                 lines.insert(0, lines.pop())
+            elif got_nothing:
+                etype = 'fail'
+                lines = ["expected %s but got nothing" % (repr(expected))]
             else:
                 etype = 'fail'
                 lines = ["expected %s but got %s" % (repr(expected),
